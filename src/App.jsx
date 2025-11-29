@@ -34,12 +34,13 @@ function App() {
   const [emojiChar, setEmojiChar] = useState('🐯');
   const [modelType, setModelType] = useState('Heavy'); 
   const [trackingMode, setTrackingMode] = useState('multi');
-  const [sourceType, setSourceType] = useState('Google'); // 默认使用 Google 源
+  const [sourceType, setSourceType] = useState('Google'); 
 
   // 状态显示
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState("等待初始化...");
   const [downloadUrl, setDownloadUrl] = useState(null);
+  const [downloadExt, setDownloadExt] = useState('mp4'); // 新增：动态后缀
   const [progress, setProgress] = useState(0);
   const [modelError, setModelError] = useState(false); 
 
@@ -50,7 +51,7 @@ function App() {
   const chunksRef = useRef([]);
   const rafIdRef = useRef(null);
   const hiddenFileInputRef = useRef(null); 
-  const hiddenModelInputRef = useRef(null); // 模型上传隐藏按钮
+  const hiddenModelInputRef = useRef(null); 
   
   const trackersRef = useRef([]);
   const nextTrackerId = useRef(1);
@@ -82,7 +83,6 @@ function App() {
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
       );
       
-      // 确定模型路径
       let assetPath;
       if (localFileUrl) {
           assetPath = localFileUrl;
@@ -108,18 +108,15 @@ function App() {
       setModelError(false);
     } catch (err) {
       console.error(err);
-      // 如果出错，提示用户手动上传
       setStatus(`❌ 自动加载失败。请使用上方的“手动导入模型”。`);
       setModelError(true); 
     }
   };
 
-  // 处理手动上传模型文件
   const handleModelFileUpload = (e) => {
       const file = e.target.files[0];
       if (file) {
           const localUrl = URL.createObjectURL(file);
-          // 使用本地文件 URL 重新尝试加载
           loadModel(modelType, sourceType, localUrl);
       }
   };
@@ -178,21 +175,43 @@ function App() {
         if (audioTrack) stream.addTrack(audioTrack);
     } catch(e) { console.warn("音频轨道合并失败:", e) }
 
-    let mimeType = 'video/webm';
+    // --- 智能格式检测逻辑 ---
+    let mimeType = '';
+    let ext = 'mp4';
+
+    // 优先尝试 H.264 MP4 (兼容性最好，WhatsApp 喜欢)
     if (MediaRecorder.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')) {
         mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-    } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+        ext = 'mp4';
+    } 
+    // 其次尝试通用 MP4
+    else if (MediaRecorder.isTypeSupported('video/mp4')) {
         mimeType = 'video/mp4';
+        ext = 'mp4';
+    } 
+    // 再次尝试 WebM (安卓/Chrome 常用)
+    else if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
+        mimeType = 'video/webm; codecs=vp9';
+        ext = 'webm';
+    } 
+    // 保底 WebM
+    else {
+        mimeType = 'video/webm';
+        ext = 'webm';
     }
+
+    console.log(`Using MIME type: ${mimeType}, Extension: .${ext}`);
+    setDownloadExt(ext); // 保存后缀名以供下载按钮使用
 
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
 
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: mimeType });
+      // 这里的 type 必须和 recorder 的 mimeType 一致
+      const blob = new Blob(chunksRef.current, { type: mimeType.split(';')[0] });
       setDownloadUrl(URL.createObjectURL(blob));
       setIsProcessing(false);
-      setStatus("✅ 处理完成！");
+      setStatus(`✅ 处理完成！(格式: .${ext})`);
       video.muted = false;
     };
 
@@ -400,7 +419,8 @@ function App() {
                 </p>
                 <input 
                     type="file" 
-                    accept=".task,.bin" 
+                    // 关键修复：放宽文件类型限制，解决 iOS 文件变灰不可选的问题
+                    // accept=".task,.bin" 
                     ref={hiddenModelInputRef}
                     onChange={handleModelFileUpload}
                     style={{display: 'none'}}
@@ -534,10 +554,10 @@ function App() {
                 <div style={{marginTop: '15px', animation: 'fadeIn 0.5s'}}>
                     <a 
                         href={downloadUrl} 
-                        download={`DanceMask_Multi_${Date.now()}.mp4`}
+                        download={`DanceMask_Multi_${Date.now()}.${downloadExt}`}
                         style={{...buttonStyle, background: '#28a745', textDecoration: 'none', padding: '15px 40px', fontSize: '18px'}}
                     >
-                        📥 下载最终视频
+                        📥 下载最终视频 ({downloadExt.toUpperCase()})
                     </a>
                 </div>
             )}
