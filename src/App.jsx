@@ -35,6 +35,7 @@ function App() {
   const maskImgRef = useRef(null);
   const chunksRef = useRef([]);
   const rafIdRef = useRef(null);
+  const hiddenFileInputRef = useRef(null); // 用于隐藏的上传按钮
   
   // === 🔥 核心：多人追踪状态池 ===
   // 我们不再只存一个 tracker，而是存一堆
@@ -113,6 +114,8 @@ function App() {
       img.src = URL.createObjectURL(file);
       img.onload = () => { maskImgRef.current = img; };
       setMaskSrc(img.src);
+      // 上传后自动切换到图片模式
+      setMaskMode('image');
     }
   };
 
@@ -366,7 +369,7 @@ function App() {
     <div style={containerStyle}>
       <header style={{textAlign: 'center', marginBottom: '30px'}}>
         <h1 style={{fontSize: '2.5rem', marginBottom: '10px', background: 'linear-gradient(45deg, #FF512F, #DD2476)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>
-            我说了坚决保护豆私
+            我说了坚决保护豆私！
         </h1>
         <p style={{color: '#666'}}>多人追踪模式上线 | 智能 ID 分配 | 互不干扰</p>
       </header>
@@ -377,7 +380,13 @@ function App() {
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px'}}>
             <div style={{flex: 1, minWidth: '280px'}}>
                 <label style={{display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#444'}}>1. 导入视频</label>
-                <input type="file" accept="video/*" onChange={handleVideoUpload} style={inputStyle} />
+                <input 
+                    key="video-upload-input"
+                    type="file" 
+                    accept="video/*" 
+                    onChange={handleVideoUpload} 
+                    style={inputStyle} 
+                />
             </div>
 
             <div style={{flex: 1, minWidth: '280px'}}>
@@ -404,28 +413,60 @@ function App() {
              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '10px'}}>
                 <label style={{fontWeight: 'bold', color: '#444'}}>3. 选择遮挡物</label>
                 <select value={maskMode} onChange={(e) => setMaskMode(e.target.value)} style={{padding: '5px', borderRadius: '4px'}}>
-                    <option value="emoji">Emoji</option>
-                    <option value="image">图片</option>
+                    <option value="emoji">Emoji 表情</option>
+                    <option value="image">自定义图片</option>
                 </select>
              </div>
              
              {maskMode === 'emoji' ? (
-                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap'}}>
+                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center'}}>
                     <input 
+                        key="emoji-input"
                         type="text" 
-                        value={emojiChar} 
+                        value={emojiChar || ''} 
                         onChange={(e) => setEmojiChar(e.target.value)} 
-                        style={{...inputStyle, width: '60px', textAlign: 'center', fontSize: '24px', padding: '5px'}}
+                        placeholder="输入表情"
+                        style={{...inputStyle, width: '120px', textAlign: 'center', fontSize: '24px', padding: '5px'}}
                     />
                     {PRESET_EMOJIS.map(e => (
                         <button key={e} onClick={() => setEmojiChar(e)} style={{border: '1px solid #ddd', background: 'white', borderRadius: '6px', cursor: 'pointer', fontSize: '20px', padding: '5px 10px'}}>
                             {e}
                         </button>
                     ))}
+                    {/* 直接上传按钮 */}
+                    <button 
+                        onClick={() => hiddenFileInputRef.current.click()} 
+                        style={{border: '1px dashed #999', background: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: '5px'}}
+                        title="上传图片"
+                    >
+                        📁 上传
+                    </button>
                 </div>
              ) : (
-                <input type="file" accept="image/*" onChange={handleMaskUpload} style={inputStyle} />
+                <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                    <input 
+                        key="mask-upload-input"
+                        type="file" 
+                        accept="image/*" 
+                        onChange={handleMaskUpload} 
+                        style={inputStyle} 
+                    />
+                    {maskSrc && (
+                        <div style={{width: '50px', height: '50px', border: '1px solid #ddd', borderRadius: '4px', overflow: 'hidden', background: '#fff'}}>
+                            <img src={maskSrc} alt="预览" style={{width: '100%', height: '100%', objectFit: 'contain'}} />
+                        </div>
+                    )}
+                </div>
              )}
+
+             {/* 隐藏的文件输入框，用于快捷上传 */}
+             <input 
+                type="file" 
+                accept="image/*" 
+                ref={hiddenFileInputRef} 
+                onChange={handleMaskUpload} 
+                style={{display: 'none'}} 
+             />
         </div>
 
         {/* 状态反馈 */}
@@ -444,7 +485,7 @@ function App() {
             {!videoSrc && (
                 <div style={{position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#888', textAlign: 'center'}}>
                     <div style={{fontSize: '40px', marginBottom: '10px'}}>🎬</div>
-                    请先上传视频<br/>支持单人/多人舞蹈
+                    请先上传视频<br/>支持单人/多人视频
                 </div>
             )}
         </div>
