@@ -7,9 +7,21 @@ const buttonStyle = { padding: '12px 24px', margin: '0 10px 10px 0', background:
 const inputStyle = { padding: '10px', borderRadius: '8px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box', fontSize: '15px', background: '#f8f9fa' };
 const cardStyle = { background: 'white', padding: '25px', borderRadius: '16px', boxShadow: '0 8px 30px rgba(0,0,0,0.08)', marginBottom: '20px' };
 const statusStyle = { fontSize: '14px', padding: '8px 12px', borderRadius: '6px', background: '#e9ecef', color: '#495057', display: 'inline-block', marginBottom: '10px' };
+const errorBoxStyle = { background: '#fff5f5', border: '1px solid #fc8181', borderRadius: '8px', padding: '15px', marginTop: '10px', color: '#c53030', fontSize: '14px' };
+const manualUploadBoxStyle = { background: '#ebf8ff', border: '1px dashed #4299e1', borderRadius: '8px', padding: '15px', marginBottom: '20px', textAlign: 'center' };
 
 // 预设一些好玩的 Emoji
 const PRESET_EMOJIS = ['🐯', '🦁', '😎', '👽', '🤡', '🤖', '💩'];
+
+// 模型下载源配置
+const MODEL_SOURCES = {
+    'Google': {
+        name: 'Google 官方源 (稳定)',
+        urls: {
+            'Heavy': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task'
+        }
+    }
+};
 
 function App() {
   // === 状态管理 ===
@@ -21,13 +33,15 @@ function App() {
   const [maskSrc, setMaskSrc] = useState(null); 
   const [emojiChar, setEmojiChar] = useState('🐯');
   const [modelType, setModelType] = useState('Heavy'); 
-  const [trackingMode, setTrackingMode] = useState('multi'); // 'single' 或 'multi'
+  const [trackingMode, setTrackingMode] = useState('multi');
+  const [sourceType, setSourceType] = useState('Google'); // 默认使用 Google 源
 
   // 状态显示
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState("等待初始化...");
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [progress, setProgress] = useState(0);
+  const [modelError, setModelError] = useState(false); 
 
   // === Refs ===
   const videoRef = useRef(null);
@@ -35,51 +49,53 @@ function App() {
   const maskImgRef = useRef(null);
   const chunksRef = useRef([]);
   const rafIdRef = useRef(null);
-  const hiddenFileInputRef = useRef(null); // 用于隐藏的上传按钮
+  const hiddenFileInputRef = useRef(null); 
+  const hiddenModelInputRef = useRef(null); // 模型上传隐藏按钮
   
-  // === 🔥 核心：多人追踪状态池 ===
-  // 我们不再只存一个 tracker，而是存一堆
-  // 结构: [ { id: 1, x: 0, y: 0, scale: 0, lostFrames: 0, color: '...' }, ... ]
   const trackersRef = useRef([]);
-  // 用于生成唯一 ID
   const nextTrackerId = useRef(1);
 
   const settingsRef = useRef({ maskMode, emojiChar, trackingMode });
 
   // 1. 初始化 AI
   useEffect(() => {
-    // 默认加载 Heavy 模型，且开启多人检测 (numPoses: 5)
-    // 即使是单人模式，我们也可以检测多人然后只画最大的那个，这样切换模式不需要重载模型
-    loadModel('Heavy'); 
-  }, []);
+    loadModel('Heavy', sourceType); 
+  }, [sourceType]); 
 
-  // 同步设置
   useEffect(() => {
     settingsRef.current = { maskMode, emojiChar, trackingMode };
   }, [maskMode, emojiChar, trackingMode]);
 
-  const loadModel = async (quality) => {
+  const loadModel = async (quality, source, localFileUrl = null) => {
     setPoseLandmarker(null);
-    setStatus(`正在下载 ${quality} 模型 (多人版)...`);
+    setModelError(false);
+    
+    if (localFileUrl) {
+        setStatus(`📦 正在解析本地模型文件...`);
+    } else {
+        const sourceName = MODEL_SOURCES[source]?.name || '默认源';
+        setStatus(`🌐 正在尝试连接服务器下载模型...`);
+    }
     
     try {
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
       );
       
-      const modelPaths = {
-        'Lite': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-        'Full': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
-        'Heavy': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task'
-      };
+      // 确定模型路径
+      let assetPath;
+      if (localFileUrl) {
+          assetPath = localFileUrl;
+      } else {
+          assetPath = MODEL_SOURCES[source].urls[quality];
+      }
 
       const landmarker = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: modelPaths[quality],
+          modelAssetPath: assetPath,
           delegate: "GPU"
         },
         runningMode: "VIDEO",
-        // 关键点：开启多人检测，最多检测 5 人
         numPoses: 5, 
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
@@ -88,11 +104,24 @@ function App() {
 
       setPoseLandmarker(landmarker);
       setModelType(quality);
-      setStatus(`✅ ${quality} 模型就绪！请导入视频`);
+      setStatus(`✅ 模型加载成功！请导入视频`);
+      setModelError(false);
     } catch (err) {
-      setStatus(`❌ 模型加载失败: ${err.message}`);
       console.error(err);
+      // 如果出错，提示用户手动上传
+      setStatus(`❌ 自动加载失败。请使用上方的“手动导入模型”。`);
+      setModelError(true); 
     }
+  };
+
+  // 处理手动上传模型文件
+  const handleModelFileUpload = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+          const localUrl = URL.createObjectURL(file);
+          // 使用本地文件 URL 重新尝试加载
+          loadModel(modelType, sourceType, localUrl);
+      }
   };
 
   const handleVideoUpload = (e) => {
@@ -114,7 +143,6 @@ function App() {
       img.src = URL.createObjectURL(file);
       img.onload = () => { maskImgRef.current = img; };
       setMaskSrc(img.src);
-      // 上传后自动切换到图片模式
       setMaskMode('image');
     }
   };
@@ -129,7 +157,6 @@ function App() {
     chunksRef.current = [];
     setProgress(0);
 
-    // 重置所有追踪器
     trackersRef.current = [];
     nextTrackerId.current = 1;
 
@@ -194,7 +221,6 @@ function App() {
         }
       } catch(e) { console.error(e); }
 
-      // 调用多人处理逻辑
       processMultiPersonAlgorithm(ctx, allLandmarks, canvas.width, canvas.height);
 
       if (totalDuration > 0) {
@@ -207,15 +233,11 @@ function App() {
     processLoop();
   };
 
-  // === 🔥 核心算法：多人逻辑 ===
   const processMultiPersonAlgorithm = (ctx, allLandmarks, width, height) => {
     const activeTrackers = trackersRef.current;
     const { trackingMode } = settingsRef.current;
 
-    // 1. 预处理：将所有检测到的骨架转换为“目标数据” (Target Data)
-    // 也就是算出每一具骨架此时此刻的头在哪里
     const detectedTargets = allLandmarks.map(landmarks => {
-        // ... (这里复用之前的 Heavy 逻辑算出单人的 x, y, scale)
         const nose = landmarks[0];
         const leftEar = landmarks[7];
         const rightEar = landmarks[8];
@@ -242,40 +264,27 @@ function App() {
             valid = true;
         }
         
-        // 如果这具骨架太小或无效，标记为 invalid
         if (shoulderDist < 10) valid = false;
 
         return { x: tx, y: ty, scale: tscale, valid, matched: false };
     }).filter(t => t.valid);
 
-    // 如果是单人模式，只保留最大的一个目标
     let targetsToProcess = detectedTargets;
     if (trackingMode === 'single' && detectedTargets.length > 0) {
-        // 找最大的 (scale 最大)
         const biggest = detectedTargets.reduce((prev, current) => (prev.scale > current.scale) ? prev : current);
         targetsToProcess = [biggest];
     }
-
-    // 2. 匹配逻辑 (Matching)：把“检测到的新位置”分配给“老 ID”
-    // 使用简单的距离匹配 (Greedy Match by Distance)
     
-    // 先把所有 Tracker 标记为未更新
     activeTrackers.forEach(t => t.updated = false);
 
     targetsToProcess.forEach(target => {
-        // 找离这个目标最近的、还没匹配过的 Tracker
         let bestDist = Infinity;
         let bestTracker = null;
 
         activeTrackers.forEach(tracker => {
-            if (tracker.updated) return; // 已经匹配过了
-            
-            // 计算距离
+            if (tracker.updated) return; 
             const dist = Math.hypot(tracker.x - target.x, tracker.y - target.y);
-            
-            // 阈值：如果距离太远（比如超过画面宽度的 1/3），可能不是同一个人
             const maxJump = width * 0.3; 
-            
             if (dist < bestDist && dist < maxJump) {
                 bestDist = dist;
                 bestTracker = tracker;
@@ -283,39 +292,32 @@ function App() {
         });
 
         if (bestTracker) {
-            // [匹配成功] 更新这个 Tracker
             updateTracker(bestTracker, target);
             bestTracker.updated = true;
             target.matched = true;
         } else {
-            // [未匹配] 这是一个新人，创建新 Tracker
             const newTracker = createTracker(target.x, target.y, target.scale);
             activeTrackers.push(newTracker);
         }
     });
 
-    // 3. 清理逻辑：没匹配到的 Tracker 怎么办？
-    // 增加 lostFrames，如果丢太久就删掉
     for (let i = activeTrackers.length - 1; i >= 0; i--) {
         const t = activeTrackers[i];
         if (!t.updated) {
             t.lostFrames++;
-            if (t.lostFrames > 10) { // 连续 10 帧没检测到，判定为消失
+            if (t.lostFrames > 10) { 
                 activeTrackers.splice(i, 1);
             }
         }
     }
 
-    // 4. 绘制所有存活的 Tracker
     activeTrackers.forEach(t => {
-        // 如果刚创建不久或还在追踪中，就画出来
         if (t.lostFrames < 5) {
             drawMask(ctx, t.x, t.y, t.scale);
         }
     });
   };
 
-  // 辅助：创建新追踪器
   const createTracker = (x, y, scale) => {
     return {
         id: nextTrackerId.current++,
@@ -325,21 +327,15 @@ function App() {
     };
   };
 
-  // 辅助：更新追踪器 (包含平滑逻辑)
   const updateTracker = (t, target) => {
     t.lostFrames = 0;
-    
-    // 位置平滑
     const alphaPos = 0.4;
     t.x += (target.x - t.x) * alphaPos;
     t.y += (target.y - t.y) * alphaPos;
-
-    // 尺寸防抖 (Deadzone)
     const sizeDiff = Math.abs(target.scale - t.scale) / t.scale;
     let alphaScale = 0.1;
-    if (sizeDiff < 0.05) alphaScale = 0.005; // 抖动锁定
+    if (sizeDiff < 0.05) alphaScale = 0.005; 
     else alphaScale = 0.1;
-
     t.scale += (target.scale - t.scale) * alphaScale;
   };
 
@@ -376,6 +372,42 @@ function App() {
 
       <div style={cardStyle}>
         
+        {/* === 新增：醒目的手动导入区域 === */}
+        {/* 只要 poseLandmarker 为空，就显示这个区域，不用等报错 */}
+        {!poseLandmarker && (
+            <div style={manualUploadBoxStyle}>
+                <h3 style={{fontSize: '16px', marginBottom: '10px', color: '#2b6cb0'}}>📡 网络初始化中...</h3>
+                <p style={{marginBottom: '10px', fontSize: '14px', color: '#4a5568'}}>
+                    如果长时间加载不动（如在中国大陆），请使用<b>离线模式</b>：
+                </p>
+                <button 
+                    onClick={() => hiddenModelInputRef.current.click()}
+                    style={{
+                        padding: '10px 20px', 
+                        background: '#3182ce', 
+                        color: 'white', 
+                        border: 'none', 
+                        borderRadius: '6px', 
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                >
+                    📂 手动导入模型文件 (.task)
+                </button>
+                <p style={{fontSize: '12px', marginTop: '8px', color: '#718096'}}>
+                    (请朋友先传给你 pose_landmarker_heavy.task 文件)
+                </p>
+                <input 
+                    type="file" 
+                    accept=".task,.bin" 
+                    ref={hiddenModelInputRef}
+                    onChange={handleModelFileUpload}
+                    style={{display: 'none'}}
+                />
+            </div>
+        )}
+
         {/* 顶部控制栏 */}
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px'}}>
             <div style={{flex: 1, minWidth: '280px'}}>
@@ -433,7 +465,6 @@ function App() {
                             {e}
                         </button>
                     ))}
-                    {/* 直接上传按钮 */}
                     <button 
                         onClick={() => hiddenFileInputRef.current.click()} 
                         style={{border: '1px dashed #999', background: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: '5px'}}
@@ -459,7 +490,6 @@ function App() {
                 </div>
              )}
 
-             {/* 隐藏的文件输入框，用于快捷上传 */}
              <input 
                 type="file" 
                 accept="image/*" 
