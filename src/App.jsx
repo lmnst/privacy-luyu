@@ -2,569 +2,421 @@ import React, { useState, useRef, useEffect } from 'react';
 import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 
 // --- 样式定义 ---
-const containerStyle = { maxWidth: '900px', margin: '0 auto', padding: '20px', fontFamily: '"Segoe UI", Roboto, Helvetica, Arial, sans-serif', color: '#333' };
-const buttonStyle = { padding: '12px 24px', margin: '0 10px 10px 0', background: '#222', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
-const inputStyle = { padding: '10px', borderRadius: '8px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box', fontSize: '15px', background: '#f8f9fa' };
-const cardStyle = { background: 'white', padding: '25px', borderRadius: '16px', boxShadow: '0 8px 30px rgba(0,0,0,0.08)', marginBottom: '20px' };
-const statusStyle = { fontSize: '14px', padding: '8px 12px', borderRadius: '6px', background: '#e9ecef', color: '#495057', display: 'inline-block', marginBottom: '10px' };
-const errorBoxStyle = { background: '#fff5f5', border: '1px solid #fc8181', borderRadius: '8px', padding: '15px', marginTop: '10px', color: '#c53030', fontSize: '14px' };
-const manualUploadBoxStyle = { background: '#ebf8ff', border: '1px dashed #4299e1', borderRadius: '8px', padding: '15px', marginBottom: '20px', textAlign: 'center' };
+const styles = {
+  container: { maxWidth: '800px', margin: '0 auto', padding: '15px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', color: '#333' },
+  header: { textAlign: 'center', marginBottom: '20px' },
+  title: { background: 'linear-gradient(45deg, #FF512F, #DD2476)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0, fontSize: '1.8rem' },
+  card: { background: 'white', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 20px rgba(0,0,0,0.05)', marginBottom: '20px' },
+  section: { marginBottom: '15px' },
+  label: { display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#444', fontSize: '14px' },
+  input: { padding: '10px', borderRadius: '8px', border: '1px solid #ddd', width: '100%', boxSizing: 'border-box', background: '#f8f9fa', fontSize: '14px' },
+  btnGroup: { display: 'flex', gap: '10px' },
+  btnOption: (active) => ({ flex: 1, padding: '10px', border: 'none', borderRadius: '8px', background: active ? '#4f46e5' : '#f1f5f9', color: active ? 'white' : '#64748b', fontWeight: '600', cursor: 'pointer', transition: '0.2s' }),
+  emojiBtn: { fontSize: '22px', padding: '5px 10px', border: '1px solid #eee', background: 'white', borderRadius: '8px', cursor: 'pointer' },
+  mainBtn: (disabled) => ({ width: '100%', padding: '15px', borderRadius: '12px', border: 'none', background: disabled ? '#cbd5e1' : '#0070f3', color: 'white', fontSize: '16px', fontWeight: 'bold', cursor: disabled ? 'not-allowed' : 'pointer', marginTop: '10px' }),
+  status: { fontSize: '12px', textAlign: 'center', color: '#666', marginTop: '10px' }
+};
 
-// 预设一些好玩的 Emoji
-const PRESET_EMOJIS = ['🐯', '🦁', '😎', '👽', '🤡', '🤖', '💩'];
+// 预设表情 (同时也支持用户自己打)
+const PRESET_EMOJIS = ['🐯', '🦁', '😎', '👽', '🤡', '💩'];
 
-// 模型下载源配置
-const MODEL_SOURCES = {
-    'Google': {
-        name: 'Google 官方源 (稳定)',
-        urls: {
-            'Heavy': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task'
-        }
-    }
+const MODEL_URLS = {
+    'Lite': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+    'Full': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+    'Heavy': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task'
 };
 
 function App() {
-  // === 状态管理 ===
+  // === 状态 ===
   const [poseLandmarker, setPoseLandmarker] = useState(null);
   const [videoSrc, setVideoSrc] = useState(null);
-  
-  // UI 选项
-  const [maskMode, setMaskMode] = useState('emoji'); 
-  const [maskSrc, setMaskSrc] = useState(null); 
-  const [emojiChar, setEmojiChar] = useState('🐯');
-  const [modelType, setModelType] = useState('Heavy'); 
-  const [trackingMode, setTrackingMode] = useState('multi');
-  const [sourceType, setSourceType] = useState('Google'); 
-
-  // 状态显示
   const [isProcessing, setIsProcessing] = useState(false);
-  const [status, setStatus] = useState("等待初始化...");
-  const [downloadUrl, setDownloadUrl] = useState(null);
-  const [downloadExt, setDownloadExt] = useState('mp4'); // 新增：动态后缀
   const [progress, setProgress] = useState(0);
-  const [modelError, setModelError] = useState(false); 
+  const [downloadUrl, setDownloadUrl] = useState(null);
+  const [downloadExt, setDownloadExt] = useState('mp4');
+  const [status, setStatus] = useState("正在初始化 AI...");
 
-  // === Refs ===
+  // 用户设置
+  const [modelType, setModelType] = useState('Lite'); // 默认 Lite
+  const [trackingMode, setTrackingMode] = useState('multi'); // 默认多人
+  const [maskMode, setMaskMode] = useState('emoji');
+  const [emojiChar, setEmojiChar] = useState('🐯');
+  const [customEmojiInput, setCustomEmojiInput] = useState(''); // 用于输入框显示
+
+  // Refs
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const maskImgRef = useRef(null);
   const chunksRef = useRef([]);
   const rafIdRef = useRef(null);
-  const hiddenFileInputRef = useRef(null); 
-  const hiddenModelInputRef = useRef(null); 
-  
   const trackersRef = useRef([]);
   const nextTrackerId = useRef(1);
-
+  const hiddenFileInputRef = useRef(null);
   const settingsRef = useRef({ maskMode, emojiChar, trackingMode });
 
-  // 1. 初始化 AI
-  useEffect(() => {
-    loadModel('Heavy', sourceType); 
-  }, [sourceType]); 
+  // 检测设备
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
+  // 1. 初始化 (加载模型)
+  useEffect(() => {
+    // 智能默认：手机用 Lite，电脑用 Heavy
+    const defaultModel = isMobile ? 'Lite' : 'Heavy';
+    setModelType(defaultModel);
+    loadModel(defaultModel);
+  }, []);
+
+  // 监听设置变化，实时更新 Ref 给动画循环用
   useEffect(() => {
     settingsRef.current = { maskMode, emojiChar, trackingMode };
   }, [maskMode, emojiChar, trackingMode]);
 
-  const loadModel = async (quality, source, localFileUrl = null) => {
+  const loadModel = async (type) => {
     setPoseLandmarker(null);
-    setModelError(false);
-    
-    if (localFileUrl) {
-        setStatus(`📦 正在解析本地模型文件...`);
-    } else {
-        const sourceName = MODEL_SOURCES[source]?.name || '默认源';
-        setStatus(`🌐 正在尝试连接服务器下载模型...`);
-    }
-    
+    setStatus(`🔄 正在切换至 ${type} 模型...`);
     try {
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
       );
-      
-      let assetPath;
-      if (localFileUrl) {
-          assetPath = localFileUrl;
-      } else {
-          assetPath = MODEL_SOURCES[source].urls[quality];
-      }
-
       const landmarker = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: assetPath,
+          modelAssetPath: MODEL_URLS[type],
           delegate: "GPU"
         },
         runningMode: "VIDEO",
-        numPoses: 5, 
+        numPoses: 5, // 最多检测5人
         minPoseDetectionConfidence: 0.5,
         minPosePresenceConfidence: 0.5,
         minTrackingConfidence: 0.5
       });
-
       setPoseLandmarker(landmarker);
-      setModelType(quality);
-      setStatus(`✅ 模型加载成功！请导入视频`);
-      setModelError(false);
+      setStatus(`✅ ${type} 模型就绪!`);
     } catch (err) {
       console.error(err);
-      setStatus(`❌ 自动加载失败。请使用上方的“手动导入模型”。`);
-      setModelError(true); 
+      setStatus("❌ 模型加载失败，请刷新重试");
     }
-  };
-
-  const handleModelFileUpload = (e) => {
-      const file = e.target.files[0];
-      if (file) {
-          const localUrl = URL.createObjectURL(file);
-          loadModel(modelType, sourceType, localUrl);
-      }
   };
 
   const handleVideoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       if (videoSrc) URL.revokeObjectURL(videoSrc);
-      const url = URL.createObjectURL(file);
-      setVideoSrc(url);
+      setVideoSrc(URL.createObjectURL(file));
       setDownloadUrl(null);
       setProgress(0);
-      setStatus("视频已加载");
     }
   };
 
-  const handleMaskUpload = (e) => {
+  const handleMaskImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       const img = new Image();
       img.src = URL.createObjectURL(file);
       img.onload = () => { maskImgRef.current = img; };
-      setMaskSrc(img.src);
       setMaskMode('image');
     }
   };
 
+  // === 核心处理逻辑 ===
   const startProcessing = async () => {
     if (!poseLandmarker || !videoRef.current) return;
     
     const video = videoRef.current;
     setIsProcessing(true);
-    setStatus("🚀 多人追踪运算中...");
+    setStatus("🚀 正在生成... 请保持屏幕常亮");
     setDownloadUrl(null);
     chunksRef.current = [];
-    setProgress(0);
-
     trackersRef.current = [];
-    nextTrackerId.current = 1;
+    setProgress(0);
 
     if (video.readyState < 2) await new Promise(r => video.onloadeddata = r);
 
+    // 💡 关键优化：分辨率降级
+    // 手机端限制最大宽 540px，电脑端 800px。
+    // 这让 Full/Heavy 模型在手机上也能跑！
+    const MAX_WIDTH = isMobile ? 540 : 800;
+    const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
+    const renderWidth = video.videoWidth * scale;
+    const renderHeight = video.videoHeight * scale;
+
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
+    canvas.width = renderWidth;
+    canvas.height = renderHeight;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-    const stream = canvas.captureStream(30);
-    try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const source = audioCtx.createMediaElementSource(video);
-        const dest = audioCtx.createMediaStreamDestination();
-        source.connect(dest);
-        const audioTrack = dest.stream.getAudioTracks()[0];
-        if (audioTrack) stream.addTrack(audioTrack);
-    } catch(e) { console.warn("音频轨道合并失败:", e) }
-
-    // --- 智能格式检测逻辑 ---
-    let mimeType = '';
-    let ext = 'mp4';
-
-    // 优先尝试 H.264 MP4 (兼容性最好，WhatsApp 喜欢)
-    if (MediaRecorder.isTypeSupported('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')) {
-        mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-        ext = 'mp4';
-    } 
-    // 其次尝试通用 MP4
-    else if (MediaRecorder.isTypeSupported('video/mp4')) {
+    // 录制设置
+    let mimeType = 'video/webm';
+    let ext = 'webm';
+    if (MediaRecorder.isTypeSupported('video/mp4')) { // iOS
         mimeType = 'video/mp4';
         ext = 'mp4';
-    } 
-    // 再次尝试 WebM (安卓/Chrome 常用)
-    else if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
+    } else if (MediaRecorder.isTypeSupported('video/webm; codecs=vp9')) {
         mimeType = 'video/webm; codecs=vp9';
-        ext = 'webm';
-    } 
-    // 保底 WebM
-    else {
-        mimeType = 'video/webm';
-        ext = 'webm';
     }
+    setDownloadExt(ext);
 
-    console.log(`Using MIME type: ${mimeType}, Extension: .${ext}`);
-    setDownloadExt(ext); // 保存后缀名以供下载按钮使用
+    // 码率：手机 2.5M，电脑 5M
+    const recorder = new MediaRecorder(canvas.captureStream(30), {
+        mimeType,
+        videoBitsPerSecond: isMobile ? 2500000 : 5000000 
+    });
 
-    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 });
-
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.ondataavailable = (e) => { if(e.data.size>0) chunksRef.current.push(e.data); };
     recorder.onstop = () => {
-      // 这里的 type 必须和 recorder 的 mimeType 一致
-      const blob = new Blob(chunksRef.current, { type: mimeType.split(';')[0] });
-      setDownloadUrl(URL.createObjectURL(blob));
-      setIsProcessing(false);
-      setStatus(`✅ 处理完成！(格式: .${ext})`);
-      video.muted = false;
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        setDownloadUrl(URL.createObjectURL(blob));
+        setIsProcessing(false);
+        setStatus("✅ 处理完成！");
+        video.muted = false;
     };
 
     recorder.start();
-
     video.currentTime = 0;
     video.muted = true;
-    await video.play();
+    try { await video.play(); } catch(e) {}
 
-    const totalDuration = video.duration;
-    
-    const processLoop = () => {
-      if (video.paused || video.ended) {
-        recorder.stop();
-        return;
-      }
-
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const startTimeMs = performance.now();
-      let allLandmarks = [];
-      try {
-        const result = poseLandmarker.detectForVideo(video, startTimeMs);
-        if (result.landmarks) {
-            allLandmarks = result.landmarks;
+    const loop = async () => {
+        if (video.paused || video.ended) {
+            recorder.stop();
+            return;
         }
-      } catch(e) { console.error(e); }
 
-      processMultiPersonAlgorithm(ctx, allLandmarks, canvas.width, canvas.height);
+        // 1. 绘制底图
+        ctx.drawImage(video, 0, 0, renderWidth, renderHeight);
 
-      if (totalDuration > 0) {
-        setProgress(Math.round((video.currentTime / totalDuration) * 100));
-      }
+        // 2. AI 识别
+        const startTime = performance.now();
+        const result = poseLandmarker.detectForVideo(video, startTime);
+        
+        // 3. 算法处理
+        if (result.landmarks) {
+            processTrackers(ctx, result.landmarks, renderWidth, renderHeight);
+        }
 
-      rafIdRef.current = requestAnimationFrame(processLoop);
+        if (video.duration) setProgress(Math.round(video.currentTime / video.duration * 100));
+        rafIdRef.current = requestAnimationFrame(loop);
     };
-
-    processLoop();
+    loop();
   };
 
-  const processMultiPersonAlgorithm = (ctx, allLandmarks, width, height) => {
-    const activeTrackers = trackersRef.current;
+  const processTrackers = (ctx, allLandmarks, width, height) => {
     const { trackingMode } = settingsRef.current;
+    const activeTrackers = trackersRef.current;
 
-    const detectedTargets = allLandmarks.map(landmarks => {
+    // 1. 提取所有目标
+    let targets = allLandmarks.map(landmarks => {
         const nose = landmarks[0];
-        const leftEar = landmarks[7];
-        const rightEar = landmarks[8];
-        const leftShoulder = landmarks[11];
-        const rightShoulder = landmarks[12];
-
-        const faceConf = Math.max(nose.visibility, leftEar.visibility, rightEar.visibility);
-        const shoulderConf = Math.min(leftShoulder.visibility, rightShoulder.visibility);
-        const shoulderDist = Math.hypot((leftShoulder.x - rightShoulder.x) * width, (leftShoulder.y - rightShoulder.y) * height);
-
-        let tx = 0, ty = 0, tscale = 0, valid = false;
-        const SCALE_FACTOR = 1.1;
-
-        if (faceConf > 0.6) {
-            if (nose.visibility > 0.6) { tx = nose.x * width; ty = nose.y * height; }
-            else { tx = (leftEar.x + rightEar.x) / 2 * width; ty = (leftEar.y + rightEar.y) / 2 * height; }
-            tscale = shoulderDist * SCALE_FACTOR;
+        const lShoulder = landmarks[11];
+        const rShoulder = landmarks[12];
+        const shoulderDist = Math.hypot((lShoulder.x - rShoulder.x)*width, (lShoulder.y - rShoulder.y)*height);
+        
+        let x=0, y=0, size=0, valid=false;
+        
+        // 优先用鼻子，没鼻子用肩膀
+        if (nose.visibility > 0.5) {
+            x = nose.x * width;
+            y = nose.y * height;
+            size = shoulderDist * 1.5;
             valid = true;
-        } else if (shoulderConf > 0.5) {
-            const sx = (leftShoulder.x + rightShoulder.x) / 2 * width;
-            const sy = (leftShoulder.y + rightShoulder.y) / 2 * height;
-            tx = sx; ty = sy - (shoulderDist * 0.5);
-            tscale = shoulderDist * SCALE_FACTOR;
+        } else if (lShoulder.visibility > 0.5) {
+            x = (lShoulder.x + rShoulder.x)/2 * width;
+            y = (lShoulder.y + rShoulder.y)/2 * height - shoulderDist*0.5;
+            size = shoulderDist * 1.5;
             valid = true;
         }
         
-        if (shoulderDist < 10) valid = false;
-
-        return { x: tx, y: ty, scale: tscale, valid, matched: false };
+        if (shoulderDist < width*0.05) valid = false; // 太小不可能是人
+        return { x, y, size, valid };
     }).filter(t => t.valid);
 
-    let targetsToProcess = detectedTargets;
-    if (trackingMode === 'single' && detectedTargets.length > 0) {
-        const biggest = detectedTargets.reduce((prev, current) => (prev.scale > current.scale) ? prev : current);
-        targetsToProcess = [biggest];
+    // 2. 模式过滤
+    if (trackingMode === 'single' && targets.length > 0) {
+        // 单人模式：只取画面中最大的那个（C位）
+        const biggest = targets.reduce((prev, curr) => (prev.size > curr.size ? prev : curr));
+        targets = [biggest];
     }
-    
+
+    // 3. 追踪算法 (ID 匹配)
     activeTrackers.forEach(t => t.updated = false);
-
-    targetsToProcess.forEach(target => {
-        let bestDist = Infinity;
-        let bestTracker = null;
-
-        activeTrackers.forEach(tracker => {
-            if (tracker.updated) return; 
+    
+    targets.forEach(target => {
+        let bestDist = Infinity, bestId = -1;
+        activeTrackers.forEach((tracker, idx) => {
+            if (tracker.updated) return;
             const dist = Math.hypot(tracker.x - target.x, tracker.y - target.y);
-            const maxJump = width * 0.3; 
-            if (dist < bestDist && dist < maxJump) {
+            if (dist < bestDist && dist < width * 0.2) { // 距离阈值
                 bestDist = dist;
-                bestTracker = tracker;
+                bestId = idx;
             }
         });
 
-        if (bestTracker) {
-            updateTracker(bestTracker, target);
-            bestTracker.updated = true;
-            target.matched = true;
+        if (bestId !== -1) {
+            // 更新老目标
+            const t = activeTrackers[bestId];
+            t.x += (target.x - t.x) * 0.6; // 平滑
+            t.y += (target.y - t.y) * 0.6;
+            t.size += (target.size - t.size) * 0.2;
+            t.updated = true;
+            t.lost = 0;
         } else {
-            const newTracker = createTracker(target.x, target.y, target.scale);
-            activeTrackers.push(newTracker);
+            // 新目标
+            activeTrackers.push({ ...target, id: nextTrackerId.current++, updated: true, lost: 0 });
         }
     });
 
+    // 4. 清理与绘制
     for (let i = activeTrackers.length - 1; i >= 0; i--) {
         const t = activeTrackers[i];
         if (!t.updated) {
-            t.lostFrames++;
-            if (t.lostFrames > 10) { 
-                activeTrackers.splice(i, 1);
-            }
+            t.lost++;
+            if (t.lost > 5) activeTrackers.splice(i, 1);
+        } else {
+            drawMask(ctx, t.x, t.y, t.size);
         }
     }
-
-    activeTrackers.forEach(t => {
-        if (t.lostFrames < 5) {
-            drawMask(ctx, t.x, t.y, t.scale);
-        }
-    });
-  };
-
-  const createTracker = (x, y, scale) => {
-    return {
-        id: nextTrackerId.current++,
-        x, y, scale,
-        updated: true,
-        lostFrames: 0
-    };
-  };
-
-  const updateTracker = (t, target) => {
-    t.lostFrames = 0;
-    const alphaPos = 0.4;
-    t.x += (target.x - t.x) * alphaPos;
-    t.y += (target.y - t.y) * alphaPos;
-    const sizeDiff = Math.abs(target.scale - t.scale) / t.scale;
-    let alphaScale = 0.1;
-    if (sizeDiff < 0.05) alphaScale = 0.005; 
-    else alphaScale = 0.1;
-    t.scale += (target.scale - t.scale) * alphaScale;
   };
 
   const drawMask = (ctx, x, y, size) => {
     const { maskMode, emojiChar } = settingsRef.current;
-    
+    if (size < 5) return;
+
     ctx.save();
     ctx.translate(x, y);
 
     if (maskMode === 'image' && maskImgRef.current) {
         const img = maskImgRef.current;
         const aspect = img.width / img.height;
-        let w = size * 1.1;
-        let h = w / aspect;
-        ctx.drawImage(img, -w/2, -h/2, w, h);
+        ctx.drawImage(img, -size/2, -size/aspect/2, size, size/aspect);
     } else {
-        ctx.font = `${size}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+        // Emoji 绘制
+        ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        // 微调 Y 轴，因为文字基线问题
         ctx.fillText(emojiChar, 0, size * 0.1); 
     }
-    
     ctx.restore();
   };
 
   return (
-    <div style={containerStyle}>
-      <header style={{textAlign: 'center', marginBottom: '30px'}}>
-        <h1 style={{fontSize: '2.5rem', marginBottom: '10px', background: 'linear-gradient(45deg, #FF512F, #DD2476)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'}}>
-            我说了坚决保护豆私！
-        </h1>
-        <p style={{color: '#666'}}>多人追踪模式上线 | 智能 ID 分配 | 互不干扰</p>
+    <div style={styles.container}>
+      <header style={styles.header}>
+        <h1 style={styles.title}>🔒 豆私！</h1>
+        <p style={{fontSize:'12px', color:'#666'}}>Vercel 纯净版 | 本地运行 | 保护隐私</p>
       </header>
 
-      <div style={cardStyle}>
-        
-        {/* === 新增：醒目的手动导入区域 === */}
-        {/* 只要 poseLandmarker 为空，就显示这个区域，不用等报错 */}
-        {!poseLandmarker && (
-            <div style={manualUploadBoxStyle}>
-                <h3 style={{fontSize: '16px', marginBottom: '10px', color: '#2b6cb0'}}>📡 网络初始化中...</h3>
-                <p style={{marginBottom: '10px', fontSize: '14px', color: '#4a5568'}}>
-                    如果长时间加载不动（如在中国大陆），请使用<b>离线模式</b>：
-                </p>
-                <button 
-                    onClick={() => hiddenModelInputRef.current.click()}
-                    style={{
-                        padding: '10px 20px', 
-                        background: '#3182ce', 
-                        color: 'white', 
-                        border: 'none', 
-                        borderRadius: '6px', 
-                        cursor: 'pointer',
-                        fontWeight: 'bold',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      <div style={styles.card}>
+        <div style={styles.section}>
+            <label style={styles.label}>1. 上传视频</label>
+            <input type="file" accept="video/*" onChange={handleVideoUpload} style={styles.input} />
+        </div>
+
+        {/* 设置区域 */}
+        <div style={{display:'flex', gap:'15px', flexWrap:'wrap', marginBottom:'15px'}}>
+            <div style={{flex:1, minWidth:'140px'}}>
+                <label style={styles.label}>追踪模式</label>
+                <div style={styles.btnGroup}>
+                    <button onClick={()=>setTrackingMode('single')} style={styles.btnOption(trackingMode==='single')}>👤 单人C位</button>
+                    <button onClick={()=>setTrackingMode('multi')} style={styles.btnOption(trackingMode==='multi')}>👥 多人并行</button>
+                </div>
+            </div>
+            <div style={{flex:1, minWidth:'140px'}}>
+                <label style={styles.label}>AI 模型精度</label>
+                <select 
+                    value={modelType} 
+                    onChange={(e) => {
+                        setModelType(e.target.value);
+                        loadModel(e.target.value);
                     }}
+                    style={styles.input}
                 >
-                    📂 手动导入模型文件 (.task)
-                </button>
-                <p style={{fontSize: '12px', marginTop: '8px', color: '#718096'}}>
-                    (请朋友先传给你 pose_landmarker_heavy.task 文件)
-                </p>
-                <input 
-                    type="file" 
-                    // 关键修复：放宽文件类型限制，解决 iOS 文件变灰不可选的问题
-                    // accept=".task,.bin" 
-                    ref={hiddenModelInputRef}
-                    onChange={handleModelFileUpload}
-                    style={{display: 'none'}}
-                />
-            </div>
-        )}
-
-        {/* 顶部控制栏 */}
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px'}}>
-            <div style={{flex: 1, minWidth: '280px'}}>
-                <label style={{display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#444'}}>1. 导入视频</label>
-                <input 
-                    key="video-upload-input"
-                    type="file" 
-                    accept="video/*" 
-                    onChange={handleVideoUpload} 
-                    style={inputStyle} 
-                />
-            </div>
-
-            <div style={{flex: 1, minWidth: '280px'}}>
-                <label style={{display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#444'}}>2. 追踪模式</label>
-                <div style={{display: 'flex', gap: '10px'}}>
-                    <button 
-                        onClick={() => setTrackingMode('single')}
-                        style={{...buttonStyle, margin: 0, flex: 1, background: trackingMode === 'single' ? '#007bff' : '#eee', color: trackingMode === 'single' ? '#fff' : '#333'}}
-                    >
-                        👤 单人C位
-                    </button>
-                    <button 
-                        onClick={() => setTrackingMode('multi')}
-                        style={{...buttonStyle, margin: 0, flex: 1, background: trackingMode === 'multi' ? '#6f42c1' : '#eee', color: trackingMode === 'multi' ? '#fff' : '#333'}}
-                    >
-                        👥 多人并行
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        {/* 遮挡设置 */}
-        <div style={{marginBottom: '20px', padding: '15px', background: '#f8f9fa', borderRadius: '12px'}}>
-             <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '10px'}}>
-                <label style={{fontWeight: 'bold', color: '#444'}}>3. 选择遮挡物</label>
-                <select value={maskMode} onChange={(e) => setMaskMode(e.target.value)} style={{padding: '5px', borderRadius: '4px'}}>
-                    <option value="emoji">Emoji 表情</option>
-                    <option value="image">自定义图片</option>
+                    <option value="Lite">Lite (手机极速 - 推荐)</option>
+                    <option value="Full">Full (均衡模式)</option>
+                    <option value="Heavy">Heavy (电脑专用 - 最准)</option>
                 </select>
-             </div>
-             
-             {maskMode === 'emoji' ? (
-                <div style={{display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center'}}>
+            </div>
+        </div>
+
+        {/* 遮挡物设置 */}
+        <div style={styles.section}>
+            <label style={styles.label}>2. 选择遮挡物 (Emoji 或 图片)</label>
+            <div style={{display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap', background:'#f8f9fa', padding:'10px', borderRadius:'8px'}}>
+                {/* 预设表情 */}
+                {PRESET_EMOJIS.map(e => (
+                    <button key={e} onClick={()=>{setMaskMode('emoji'); setEmojiChar(e)}} style={styles.emojiBtn}>{e}</button>
+                ))}
+                
+                {/* 自定义输入 - 关键新功能 */}
+                <div style={{position:'relative', display:'flex', alignItems:'center'}}>
                     <input 
-                        key="emoji-input"
                         type="text" 
-                        value={emojiChar || ''} 
-                        onChange={(e) => setEmojiChar(e.target.value)} 
-                        placeholder="输入表情"
-                        style={{...inputStyle, width: '120px', textAlign: 'center', fontSize: '24px', padding: '5px'}}
+                        value={customEmojiInput}
+                        placeholder="输入..."
+                        maxLength={2}
+                        onChange={(e) => {
+                            const val = e.target.value;
+                            setCustomEmojiInput(val);
+                            if(val) { setEmojiChar(val); setMaskMode('emoji'); }
+                        }}
+                        style={{width:'60px', padding:'5px', borderRadius:'6px', border:'1px solid #ccc', textAlign:'center'}}
                     />
-                    {PRESET_EMOJIS.map(e => (
-                        <button key={e} onClick={() => setEmojiChar(e)} style={{border: '1px solid #ddd', background: 'white', borderRadius: '6px', cursor: 'pointer', fontSize: '20px', padding: '5px 10px'}}>
-                            {e}
-                        </button>
-                    ))}
-                    <button 
-                        onClick={() => hiddenFileInputRef.current.click()} 
-                        style={{border: '1px dashed #999', background: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '14px', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: '5px'}}
-                        title="上传图片"
-                    >
-                        📁 上传
-                    </button>
                 </div>
-             ) : (
-                <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
-                    <input 
-                        key="mask-upload-input"
-                        type="file" 
-                        accept="image/*" 
-                        onChange={handleMaskUpload} 
-                        style={inputStyle} 
-                    />
-                    {maskSrc && (
-                        <div style={{width: '50px', height: '50px', border: '1px solid #ddd', borderRadius: '4px', overflow: 'hidden', background: '#fff'}}>
-                            <img src={maskSrc} alt="预览" style={{width: '100%', height: '100%', objectFit: 'contain'}} />
-                        </div>
-                    )}
-                </div>
-             )}
 
-             <input 
-                type="file" 
-                accept="image/*" 
-                ref={hiddenFileInputRef} 
-                onChange={handleMaskUpload} 
-                style={{display: 'none'}} 
-             />
+                <div style={{width:'1px', height:'20px', background:'#ccc', margin:'0 5px'}}></div>
+
+                {/* 图片上传 */}
+                <button onClick={()=>hiddenFileInputRef.current.click()} style={{...styles.emojiBtn, fontSize:'14px', background:'#e2e8f0'}}>📁 图</button>
+                <input type="file" accept="image/*" ref={hiddenFileInputRef} onChange={handleMaskImageUpload} style={{display:'none'}} />
+            </div>
+            <div style={{marginTop:'5px', textAlign:'center'}}>
+                当前使用: <span style={{fontSize:'20px'}}>{maskMode==='image' ? '🖼️ 图片' : emojiChar}</span>
+            </div>
         </div>
 
-        {/* 状态反馈 */}
-        <div style={{marginBottom: '10px'}}>
-            <span style={statusStyle}>{status}</span>
+        {/* 画布 */}
+        <div style={{position:'relative', width:'100%', background:'#000', borderRadius:'10px', overflow:'hidden', minHeight:'200px', display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <canvas ref={canvasRef} style={{maxWidth:'100%', maxHeight:'60vh'}} />
             {isProcessing && (
-                <span style={{...statusStyle, background: '#e3f2fd', color: '#0d47a1', marginLeft: '10px'}}>
-                   进度: {progress}%
-                </span>
-            )}
-        </div>
-
-        {/* 核心画布 */}
-        <div style={{position: 'relative', width: '100%', background: '#000', borderRadius: '12px', overflow: 'hidden', display: 'flex', justifyContent: 'center', minHeight: '400px'}}>
-            <canvas ref={canvasRef} style={{maxWidth: '100%', maxHeight: '600px', display: 'block'}} />
-            {!videoSrc && (
-                <div style={{position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#888', textAlign: 'center'}}>
-                    <div style={{fontSize: '40px', marginBottom: '10px'}}>🎬</div>
-                    请先上传视频<br/>支持单人/多人视频
+                <div style={{position:'absolute', top:10, right:10, background:'rgba(255,255,255,0.9)', color:'#0070f3', padding:'5px 10px', borderRadius:'15px', fontSize:'12px', fontWeight:'bold'}}>
+                    {progress}%
                 </div>
             )}
+            {!videoSrc && <div style={{color:'#666'}}>🎬 视频预览区</div>}
         </div>
 
-        {/* 操作栏 */}
-        <div style={{marginTop: '25px', textAlign: 'center'}}>
+        {/* 底部按钮 */}
+        <div style={{marginTop:'20px'}}>
             <button 
-                style={{...buttonStyle, padding: '15px 40px', fontSize: '18px', background: (!poseLandmarker || !videoSrc || isProcessing) ? '#ccc' : '#007bff'}} 
-                onClick={startProcessing}
+                onClick={startProcessing} 
                 disabled={!poseLandmarker || !videoSrc || isProcessing}
+                style={styles.mainBtn(!poseLandmarker || !videoSrc || isProcessing)}
             >
-                {isProcessing ? '⏳ 正在运算...' : '✨ 开始生成视频'}
+                {isProcessing ? '⏳ 正在处理中...' : '✨ 开始生成视频'}
             </button>
 
             {downloadUrl && (
-                <div style={{marginTop: '15px', animation: 'fadeIn 0.5s'}}>
+                <div style={{marginTop:'15px', animation:'fadeIn 0.5s'}}>
                     <a 
                         href={downloadUrl} 
-                        download={`DanceMask_Multi_${Date.now()}.${downloadExt}`}
-                        style={{...buttonStyle, background: '#28a745', textDecoration: 'none', padding: '15px 40px', fontSize: '18px'}}
+                        download={`PrivacyMask_${Date.now()}.${downloadExt}`}
+                        style={{...styles.mainBtn(false), background:'#10b981', display:'block', textDecoration:'none', textAlign:'center'}}
                     >
-                        📥 下载最终视频 ({downloadExt.toUpperCase()})
+                        📥 保存到相册 ({downloadExt.toUpperCase()})
                     </a>
+                    
+                    <div style={{background:'#fef2f2', padding:'10px', borderRadius:'8px', marginTop:'10px', fontSize:'12px', color:'#b91c1c', textAlign:'left'}}>
+                        <p style={{margin:'0 0 5px'}}><b>⚠️ 常见问题修复：</b></p>
+                        <ul style={{paddingLeft:'20px', margin:0}}>
+                            <li><b>发给朋友发不出去？</b> 请在手机相册点“编辑”，随便裁剪一下或加个滤镜，保存后即可正常发送。</li>
+                            <li><b>iOS用户</b>：点击下载后，请选底部的“分享” -> “存储到文件”。</li>
+                        </ul>
+                    </div>
                 </div>
             )}
+            <div style={styles.status}>{status}</div>
         </div>
       </div>
-
-      <video ref={videoRef} src={videoSrc} playsInline crossOrigin="anonymous" style={{display: 'none'}} />
+      
+      <video ref={videoRef} src={videoSrc} playsInline style={{display:'none'}} muted crossOrigin="anonymous" />
     </div>
   );
 }
